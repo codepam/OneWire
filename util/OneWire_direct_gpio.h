@@ -117,40 +117,58 @@
 #define DIRECT_WRITE_HIGH(base, mask)   (GPOS = (mask))             //GPIO_OUT_W1TS_ADDRESS
 
 #elif defined(ARDUINO_ARCH_ESP32)
+// Code adapted from cores/esp32/esp32-hal-gpio.c of arduino-esp32 v2.0.0
 #include <driver/rtc_io.h>
+#include <esp32-hal-gpio.h>
 #define PIN_TO_BASEREG(pin)             (0)
 #define PIN_TO_BITMASK(pin)             (pin)
 #define IO_REG_TYPE uint32_t
 #define IO_REG_BASE_ATTR
 #define IO_REG_MASK_ATTR
 
+#if !defined(ESP_ARDUINO_VERSION)
+#define NUM_OUPUT_PINS 34
+#endif
+
 static inline __attribute__((always_inline))
 IO_REG_TYPE directRead(IO_REG_TYPE pin)
 {
+#if CONFIG_IDF_TARGET_ESP32C3
+    return (GPIO.in.data >> pin) & 0x1;
+#else
     if ( pin < 32 )
         return (GPIO.in >> pin) & 0x1;
-    else if ( pin < 40 )
+    else if ( pin < GPIO_PIN_COUNT )
         return (GPIO.in1.val >> (pin - 32)) & 0x1;
 
     return 0;
+#endif
 }
 
 static inline __attribute__((always_inline))
 void directWriteLow(IO_REG_TYPE pin)
 {
+#if CONFIG_IDF_TARGET_ESP32C3
+    GPIO.out_w1tc.out_w1ts = (1 << pin);
+#else
     if ( pin < 32 )
         GPIO.out_w1tc = ((uint32_t)1 << pin);
-    else if ( pin < 34 )
+    else if ( pin < NUM_OUPUT_PINS )
         GPIO.out1_w1tc.val = ((uint32_t)1 << (pin - 32));
+#endif
 }
 
 static inline __attribute__((always_inline))
 void directWriteHigh(IO_REG_TYPE pin)
 {
+#if CONFIG_IDF_TARGET_ESP32C3
+    GPIO.out_w1ts.out_w1ts = (1 << pin);
+#else
     if ( pin < 32 )
         GPIO.out_w1ts = ((uint32_t)1 << pin);
-    else if ( pin < 34 )
+    else if ( pin < NUM_OUPUT_PINS )
         GPIO.out1_w1ts.val = ((uint32_t)1 << (pin - 32));
+#endif
 }
 
 static inline __attribute__((always_inline))
@@ -158,18 +176,18 @@ void directModeInput(IO_REG_TYPE pin)
 {
     if ( digitalPinIsValid(pin) )
     {
-        #if defined(ESP_ARDUINO_VERSION)
-        #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(2, 0, 0)
-        int pin_io = rtc_io_number_get((gpio_num_t)pin);
-        uint32_t rtc_reg(rtc_io_desc[pin_io].reg);
+#if defined(ESP_ARDUINO_VERSION)
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(2, 0, 0)
+        int8_t rtc_io = esp32_gpioMux[pin].rtc;
+        uint32_t rtc_reg = (rtc_io != -1)?rtc_io_desc[rtc_io].reg:0;
 
         if ( rtc_reg ) // RTC pins PULL settings
         {
-            ESP_REG(rtc_reg) = ESP_REG(rtc_reg) & ~(rtc_io_desc[pin_io].mux);
-            ESP_REG(rtc_reg) = ESP_REG(rtc_reg) & ~(rtc_io_desc[pin_io].pullup | rtc_io_desc[pin_io].pulldown);
+            ESP_REG(rtc_reg) = ESP_REG(rtc_reg) & ~(rtc_io_desc[rtc_io].mux);
+            ESP_REG(rtc_reg) = ESP_REG(rtc_reg) & ~(rtc_io_desc[rtc_io].pullup | rtc_io_desc[rtc_io].pulldown);
         }
-        #endif
-        #else
+#endif
+#else
         uint32_t rtc_reg(rtc_gpio_desc[pin].reg);
 
         if ( rtc_reg ) // RTC pins PULL settings
@@ -177,7 +195,7 @@ void directModeInput(IO_REG_TYPE pin)
             ESP_REG(rtc_reg) = ESP_REG(rtc_reg) & ~(rtc_gpio_desc[pin].mux);
             ESP_REG(rtc_reg) = ESP_REG(rtc_reg) & ~(rtc_gpio_desc[pin].pullup | rtc_gpio_desc[pin].pulldown);
         }
-        #endif
+#endif
 
         if ( pin < 32 )
             GPIO.enable_w1tc = ((uint32_t)1 << pin);
@@ -197,20 +215,20 @@ void directModeInput(IO_REG_TYPE pin)
 static inline __attribute__((always_inline))
 void directModeOutput(IO_REG_TYPE pin)
 {
-    if ( digitalPinIsValid(pin) && pin <= 33 ) // pins above 33 can be only inputs
+    if ( digitalPinIsValid(pin) && pin < NUM_OUPUT_PINS ) // pins >= NUM_OUPUT_PINS can be only inputs
     {
-        #if defined(ESP_ARDUINO_VERSION)
-        #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(2, 0, 0)
-        int pin_io = rtc_io_number_get((gpio_num_t)pin);
-        uint32_t rtc_reg(rtc_io_desc[pin_io].reg);
+#if defined(ESP_ARDUINO_VERSION)
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(2, 0, 0)
+        int8_t rtc_io = esp32_gpioMux[pin].rtc;
+        uint32_t rtc_reg = (rtc_io != -1)?rtc_io_desc[rtc_io].reg:0;
 
         if ( rtc_reg ) // RTC pins PULL settings
         {
-            ESP_REG(rtc_reg) = ESP_REG(rtc_reg) & ~(rtc_io_desc[pin_io].mux);
-            ESP_REG(rtc_reg) = ESP_REG(rtc_reg) & ~(rtc_io_desc[pin_io].pullup | rtc_io_desc[pin_io].pulldown);
+            ESP_REG(rtc_reg) = ESP_REG(rtc_reg) & ~(rtc_io_desc[rtc_io].mux);
+            ESP_REG(rtc_reg) = ESP_REG(rtc_reg) & ~(rtc_io_desc[rtc_io].pullup | rtc_io_desc[rtc_io].pulldown);
         }
-        #endif
-        #else
+#endif
+#else
         uint32_t rtc_reg(rtc_gpio_desc[pin].reg);
 
         if ( rtc_reg ) // RTC pins PULL settings
@@ -218,11 +236,11 @@ void directModeOutput(IO_REG_TYPE pin)
             ESP_REG(rtc_reg) = ESP_REG(rtc_reg) & ~(rtc_gpio_desc[pin].mux);
             ESP_REG(rtc_reg) = ESP_REG(rtc_reg) & ~(rtc_gpio_desc[pin].pullup | rtc_gpio_desc[pin].pulldown);
         }
-        #endif
+#endif
 
         if ( pin < 32 )
             GPIO.enable_w1ts = ((uint32_t)1 << pin);
-        else // already validated to pins <= 33
+        else // already validated to pins < NUM_OUPUT_PINS
             GPIO.enable1_w1ts.val = ((uint32_t)1 << (pin - 32));
 
         uint32_t pinFunction((uint32_t)2 << FUN_DRV_S); // what are the drivers?
